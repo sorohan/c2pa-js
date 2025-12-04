@@ -39,6 +39,21 @@ export async function createWorkerManager(
 
   const worker = new Worker();
 
+  // Listen for worker console logs
+  worker.addEventListener('message', (event) => {
+    if (event.data?.type === 'WORKER_LOG') {
+      const { level, args } = event.data;
+      const prefix = '[WORKER] ';
+      if (level === 'error') {
+        console.error(prefix, ...args);
+      } else if (level === 'warn') {
+        console.warn(prefix, ...args);
+      } else {
+        console.log(prefix, ...args);
+      }
+    }
+  });
+
   const tx = createTx(worker);
 
   const signingRequestMap = new Map<number, Signer['sign']>();

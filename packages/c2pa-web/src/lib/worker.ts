@@ -9,6 +9,50 @@
 
 /// <reference lib="webworker" />
 
+// Intercept console logs and broadcast to main thread
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+const originalInfo = console.info;
+
+console.log = (...args: any[]) => {
+  originalLog(...args);
+  self.postMessage({
+    type: 'WORKER_LOG',
+    level: 'log',
+    args: args.map(String),
+  });
+};
+
+console.info = (...args: any[]) => {
+  originalInfo(...args);
+  self.postMessage({
+    type: 'WORKER_LOG',
+    level: 'info',
+    args: args.map(String),
+  });
+};
+
+console.error = (...args: any[]) => {
+  originalError(...args);
+  self.postMessage({
+    type: 'WORKER_LOG',
+    level: 'error',
+    args: args.map(String),
+  });
+};
+
+console.warn = (...args: any[]) => {
+  originalWarn(...args);
+  self.postMessage({
+    type: 'WORKER_LOG',
+    level: 'warn',
+    args: args.map(String),
+  });
+};
+
+console.log('🔧 [WORKER] Console interception active');
+
 import {
   WasmReader,
   initSync,

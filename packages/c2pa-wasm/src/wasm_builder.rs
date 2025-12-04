@@ -222,17 +222,28 @@ impl WasmBuilder {
         source: &Blob,
         dest: &mut Vec<u8>,
     ) -> Result<Vec<u8>, JsError> {
+        web_sys::console::log_1(&"🔧 [RUST] Creating signer from definition".into());
         let signer = WasmSigner::from_definition(&signer_definition)?;
-        let mut stream = BlobStream::new(source);
+        web_sys::console::log_1(&"🔧 [RUST] Signer created successfully".into());
 
+        let mut stream = BlobStream::new(source);
         let mut cursor = Cursor::new(dest);
 
+        web_sys::console::log_1(
+            &format!("🔧 [RUST] Starting sign_async for format: {}", format).into(),
+        );
         let manifest = self
             .builder
             .sign_async(&signer, format, &mut stream, &mut cursor)
             .await
-            .map_err(WasmError::from)?;
+            .map_err(|e| {
+                web_sys::console::error_1(
+                    &format!("🔧 [RUST] Sign failed with error: {:?}", e).into(),
+                );
+                WasmError::from(e)
+            })?;
 
+        web_sys::console::log_1(&"🔧 [RUST] Signing completed successfully".into());
         Ok(manifest)
     }
 }

@@ -35,4 +35,6 @@ pub(crate) mod utils;
 #[wasm_bindgen(start)]
 pub fn run() {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init_with_level(log::Level::Trace).expect("error initializing logger");
+    web_sys::console::log_1(&"🔧 CUSTOM c2pa-wasm LOADED (TRACE logging)".into());
 }
