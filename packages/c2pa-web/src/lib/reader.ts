@@ -40,6 +40,32 @@ export interface ReaderFactory {
     init: Blob,
     fragment: Blob
   ) => Promise<Reader | null>;
+
+  /**
+   * Extract raw C2PA manifest bytes (JUMBF) from an asset.
+   * This is equivalent to Rust's Store::load_jumbf_from_stream().
+   * These bytes can be cached and later restored as an ingredient using
+   * Builder.addIngredientFromManifest().
+   *
+   * @param format Asset format (e.g., 'image/jpeg').
+   * @param blob Blob of asset bytes.
+   * @returns Uint8Array of the raw JUMBF manifest bytes.
+   * @throws Error if no C2PA metadata was found.
+   *
+   * @example Extracting and caching manifest bytes:
+   * ```
+   * // Extract manifest bytes from an asset
+   * const manifestBytes = await c2pa.reader.getManifestBytes('image/jpeg', blob);
+   *
+   * // Store the bytes for later use
+   * await database.store(assetId, manifestBytes);
+   *
+   * // Later, restore as an ingredient
+   * const cachedBytes = await database.retrieve(assetId);
+   * await builder.addIngredientFromManifest(cachedBytes);
+   * ```
+   */
+  getManifestBytes: (format: string, blob: Blob) => Promise<Uint8Array>;
 }
 
 /**
@@ -158,6 +184,18 @@ export function createReaderFactory(worker: WorkerManager): ReaderFactory {
       } catch (e: unknown) {
         return handleReaderCreationError(e);
       }
+    },
+
+    getManifestBytes(format: string, blob: Blob): Promise<Uint8Array> {
+      if (!isSupportedReaderFormat(format)) {
+        throw new UnsupportedFormatError(format);
+      }
+
+      if (blob.size > MAX_SIZE_IN_BYTES) {
+        throw new AssetTooLargeError(blob.size);
+      }
+
+      return tx.reader_getManifestBytes(format, blob);
     },
   };
 }

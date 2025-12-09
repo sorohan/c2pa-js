@@ -100,6 +100,19 @@ export interface Builder {
   ) => Promise<void>;
 
   /**
+   * Add an ingredient to the builder from cached manifest data.
+   * This is useful when you have the ingredient's C2PA manifest bytes but not the original asset.
+   * The manifest data contains all necessary information including title, format, and instance ID.
+   *
+   * @param manifestData A byte array containing the ingredient's C2PA manifest store (JUMBF format).
+   * @param relationship Optional relationship type for this ingredient.
+   */
+  addIngredientFromManifest: (
+    manifestData: Uint8Array,
+    relationship?: 'parentOf' | 'componentOf' | 'inputTo'
+  ) => Promise<void>;
+
+  /**
    * Add a resource to the builder's resource store with an ID and blob of the resource's bytes.
    *
    * @param resourceId ID associated with the resource being added.
@@ -238,6 +251,17 @@ function createBuilder(
     ) {
       const json = JSON.stringify(ingredientDefinition);
       await tx.builder_addIngredientFromBlob(id, json, format, blob);
+    },
+
+    async addIngredientFromManifest(
+      manifestData: Uint8Array,
+      relationship?: 'parentOf' | 'componentOf' | 'inputTo'
+    ) {
+      await tx.builder_addIngredientFromManifest(
+        id,
+        manifestData,
+        relationship
+      );
     },
 
     async addResourceFromBlob(resourceId: string, blob: Blob) {

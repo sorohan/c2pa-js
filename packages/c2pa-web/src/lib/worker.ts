@@ -41,6 +41,11 @@ rx({
     const readerId = readerMap.add(reader);
     return readerId;
   },
+  reader_getManifestBytes(format, blob) {
+    const bytes = WasmReader.getManifestBytes(format, blob);
+    // Transfer the bytes buffer to avoid copying
+    return transfer(bytes, bytes.buffer);
+  },
   reader_activeLabel(readerId) {
     const reader = readerMap.get(readerId);
     return reader.activeLabel() ?? null;
@@ -105,6 +110,10 @@ rx({
   builder_addIngredientFromBlob(builderId, json, format, blob) {
     const builder = builderMap.get(builderId);
     builder.addIngredientFromBlob(json, format, blob);
+  },
+  builder_addIngredientFromManifest(builderId, manifestData, relationship) {
+    const builder = builderMap.get(builderId);
+    builder.addIngredientFromManifest(manifestData, relationship);
   },
   builder_addResourceFromBlob(builderId, id, blob) {
     const builder = builderMap.get(builderId);

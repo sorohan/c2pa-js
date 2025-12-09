@@ -25,6 +25,9 @@ const { createTx, rx } = channel<{
     fragment: Blob
   ) => Promise<number>;
 
+  // Static reader method for extracting manifest bytes
+  reader_getManifestBytes: (format: string, blob: Blob) => Uint8Array;
+
   // Reader methods
   reader_activeLabel: (readerId: number) => string | null;
   reader_manifestStore: (readerId: number) => any;
@@ -57,6 +60,11 @@ const { createTx, rx } = channel<{
     format: string,
     blob: Blob
   ) => void;
+  builder_addIngredientFromManifest(
+    builderId: number,
+    manifestData: Uint8Array,
+    relationship?: string
+  ): void;
   builder_addResourceFromBlob: (
     builderId: number,
     id: string,

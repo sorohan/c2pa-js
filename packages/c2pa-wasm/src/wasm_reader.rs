@@ -121,4 +121,19 @@ impl WasmReader {
 
         cursor_to_u8array(stream)
     }
+
+    /// Extracts the raw C2PA manifest bytes (JUMBF) from an asset.
+    /// These bytes can be stored and later used as an ingredient.
+    ///
+    /// Returns the manifest bytes as a Uint8Array.
+    /// Throws an error if no manifest is found.
+    #[wasm_bindgen(js_name = getManifestBytes)]
+    pub fn get_manifest_bytes(format: &str, blob: &Blob) -> Result<Uint8Array, JsError> {
+        use c2pa::jumbf_io::load_jumbf_from_stream;
+
+        let mut stream = BlobStream::new(blob);
+        let bytes = load_jumbf_from_stream(format, &mut stream).map_err(WasmError::from)?;
+
+        Ok(Uint8Array::from(bytes.as_slice()))
+    }
 }
