@@ -12,10 +12,144 @@ import { ManifestDefinition, Ingredient } from '@contentauth/c2pa-types';
 import { getBlobForAsset } from 'test/utils.js';
 import { Settings } from './settings.js';
 import { createC2pa } from './c2pa.js';
+import { Signer } from './signer.js';
 import wasmSrc from '@contentauth/c2pa-web/resources/c2pa.wasm?url';
 
 import C_JPG from 'test/assets/C.jpg';
 import PirateShip_cloud from 'test/assets/PirateShip_save_credentials_to_cloud.jpg';
+import signingPrivateKey from 'test/signing/es256.pem?raw';
+import signingCertChain from 'test/signing/es256.pub?raw';
+
+const C2PA_UUID = 'd8fec3d61b0e483c92975828877ec481';
+const SENSITIVITY_LABEL_UUID = '4d495053fcf644baa37a29b1d8e4964f';
+const SENSITIVITY_LABEL_XML = '<?xml version="1.0"?><Label />';
+
+function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+  const result = new Uint8Array(
+    arrays.reduce((length, array) => length + array.byteLength, 0)
+  );
+  let offset = 0;
+
+  for (const array of arrays) {
+    result.set(array, offset);
+    offset += array.byteLength;
+  }
+
+  return result;
+}
+
+function makeBox(type: string, payload = new Uint8Array()): Uint8Array {
+  const bytes = new Uint8Array(8 + payload.byteLength);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, bytes.byteLength);
+  bytes.set(new TextEncoder().encode(type), 4);
+  bytes.set(payload, 8);
+  return bytes;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  return Uint8Array.from(
+    hex.match(/.{2}/g)?.map(byte => Number.parseInt(byte, 16)) ?? []
+  );
+}
+
+function makeSensitivityLabelMp4(): Uint8Array {
+  const ftypPayload = new Uint8Array(8);
+  ftypPayload.set(new TextEncoder().encode('isom'));
+
+  const sensitivityLabelPayload = concatBytes(
+    hexToBytes(SENSITIVITY_LABEL_UUID),
+    new TextEncoder().encode(SENSITIVITY_LABEL_XML)
+  );
+
+  return concatBytes(
+    makeBox('ftyp', ftypPayload),
+    makeBox('uuid', sensitivityLabelPayload),
+    makeBox('free')
+  );
+}
+
+interface TopLevelBox {
+  type: string;
+  uuid?: string;
+  payload: Uint8Array;
+}
+
+function readTopLevelBoxes(bytes: Uint8Array): TopLevelBox[] {
+  const boxes: TopLevelBox[] = [];
+  const decoder = new TextDecoder();
+  let offset = 0;
+
+  while (offset < bytes.byteLength) {
+    const view = new DataView(
+      bytes.buffer,
+      bytes.byteOffset + offset,
+      bytes.byteLength - offset
+    );
+    const size = view.getUint32(0);
+    const type = decoder.decode(bytes.subarray(offset + 4, offset + 8));
+
+    if (size < 8 || offset + size > bytes.byteLength) {
+      throw new Error(`Invalid ${type} box size: ${size}`);
+    }
+
+    const uuid =
+      type === 'uuid'
+        ? Array.from(bytes.subarray(offset + 8, offset + 24))
+            .map(byte => byte.toString(16).padStart(2, '0'))
+            .join('')
+        : undefined;
+    const payloadOffset = type === 'uuid' ? offset + 24 : offset + 8;
+
+    boxes.push({
+      type,
+      uuid,
+      payload: bytes.slice(payloadOffset, offset + size)
+    });
+    offset += size;
+  }
+
+  return boxes;
+}
+
+function decodePrivateKey(pem: string): Uint8Array {
+  const base64 = pem
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .replace(/\s/g, '');
+  return Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+}
+
+async function createTestSigner(): Promise<Signer> {
+  const privateKey = await crypto.subtle.importKey(
+    'pkcs8',
+    decodePrivateKey(signingPrivateKey),
+    {
+      name: 'ECDSA',
+      namedCurve: 'P-256'
+    },
+    false,
+    ['sign']
+  );
+
+  return {
+    alg: 'es256',
+    directCoseHandling: false,
+    reserveSize: async () => 10_000,
+    certs: async () => [signingCertChain],
+    sign: async data =>
+      new Uint8Array(
+        await crypto.subtle.sign(
+          {
+            name: 'ECDSA',
+            hash: 'SHA-256'
+          },
+          privateKey,
+          data
+        )
+      )
+  };
+}
 
 describe('builder', () => {
   describe('creation', () => {
@@ -385,6 +519,57 @@ describe('builder', () => {
 
         expect(definition.ingredients).toHaveLength(1);
         expect(definition.ingredients?.[0]).toMatchObject(ingredient);
+      });
+    });
+
+    describe('sign', () => {
+      test('should preserve sensitivity label order and produce a valid BMFF hash', async ({
+        c2pa
+      }) => {
+        const builder = await c2pa.builder.fromDefinition({
+          claim_generator_info: [
+            {
+              name: 'c2pa-web-test',
+              version: '1.0.0'
+            }
+          ],
+          title: 'sensitivity-label.mp4',
+          format: 'video/mp4',
+          instance_id: 'xmp:iid:sensitivity-label-test',
+          assertions: [],
+          ingredients: []
+        });
+        const signer = await createTestSigner();
+        const source = new Blob([makeSensitivityLabelMp4()], {
+          type: 'video/mp4'
+        });
+
+        const signedBytes = await builder.sign(signer, source.type, source);
+        const boxes = readTopLevelBoxes(signedBytes);
+
+        expect(boxes.slice(0, 3).map(box => [box.type, box.uuid])).toEqual([
+          ['ftyp', undefined],
+          ['uuid', SENSITIVITY_LABEL_UUID],
+          ['uuid', C2PA_UUID]
+        ]);
+        expect(new TextDecoder().decode(boxes[1].payload)).toBe(
+          SENSITIVITY_LABEL_XML
+        );
+
+        const reader = await c2pa.reader.fromBlob(
+          source.type,
+          new Blob([signedBytes], { type: source.type })
+        );
+        expect(reader).not.toBeNull();
+
+        const manifestStore = await reader!.manifestStore();
+        const successCodes =
+          manifestStore.validation_results?.activeManifest?.success.map(
+            result => result.code
+          );
+
+        expect(successCodes).toContain('claimSignature.validated');
+        expect(successCodes).toContain('assertion.bmffHash.match');
       });
     });
   });
