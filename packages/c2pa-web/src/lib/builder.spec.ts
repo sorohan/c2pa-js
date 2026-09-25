@@ -112,6 +112,42 @@ function readTopLevelBoxes(bytes: Uint8Array): TopLevelBox[] {
   return boxes;
 }
 
+function changeSensitivityLabelPayload(bytes: Uint8Array): Uint8Array {
+  const changed = bytes.slice();
+  const decoder = new TextDecoder();
+  const sensitivityLabelUuid = hexToBytes(SENSITIVITY_LABEL_UUID);
+  let offset = 0;
+
+  while (offset < changed.byteLength) {
+    const view = new DataView(
+      changed.buffer,
+      changed.byteOffset + offset,
+      changed.byteLength - offset
+    );
+    const size = view.getUint32(0);
+    const type = decoder.decode(changed.subarray(offset + 4, offset + 8));
+
+    if (size < 8 || offset + size > changed.byteLength) {
+      throw new Error(`Invalid ${type} box size: ${size}`);
+    }
+
+    if (
+      type === 'uuid' &&
+      changed
+        .subarray(offset + 8, offset + 24)
+        .every((byte, index) => byte === sensitivityLabelUuid[index])
+    ) {
+      const payloadOffset = offset + 24;
+      changed[payloadOffset] ^= 0x01;
+      return changed;
+    }
+
+    offset += size;
+  }
+
+  throw new Error('Sensitivity label UUID box not found');
+}
+
 function decodePrivateKey(pem: string): Uint8Array {
   const base64 = pem
     .replace('-----BEGIN PRIVATE KEY-----', '')
@@ -558,7 +594,9 @@ describe('builder', () => {
 
         const reader = await c2pa.reader.fromBlob(
           source.type,
-          new Blob([signedBytes], { type: source.type })
+          new Blob([changeSensitivityLabelPayload(signedBytes)], {
+            type: source.type
+          })
         );
         expect(reader).not.toBeNull();
 
